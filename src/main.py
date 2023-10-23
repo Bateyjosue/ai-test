@@ -9,7 +9,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from typing import Annotated, List
 
 import whisper
+import hifi_gan
 import torch
+
+import numpy as np
+import torchaudio
 
 from tempfile import NamedTemporaryFile
 
@@ -19,74 +23,47 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 model = whisper.load_model('base', DEVICE)
 
+# dims_value = 80
 
 
+# whisper_model = whisper.Whisper(dims=dims_value)
 
+# Create an instance of the HIFI GAN model
+hifi_gan_model = hifi_gan.initialize_model()
 
 
 
 app= FastAPI(title = "aitest")
 
 @app.post('/whisper')
-async def handler(files: List[UploadFile] = File(...)):
-  if not files:
-    raise HTTPException(status_code=400, detail="No files were uploaded")
-  
-  results = []
+async def handler(file: UploadFile = File(...)):
+    if not file:
+        raise HTTPException(status_code=400, detail="No audio file was uploaded")
 
-  for file in files:
-    with NamedTemporaryFile(delete=True) as temp:
-      with open(temp.name, 'wb+') as temp_file:
-        temp_file.write(file.file.read())
-        
-        result = model.transcribe('temp.name')
-        results.append(
-          {
-            "filename": file.filename,
-            "transribe": result['text']
-          }
-        )
-  return JSONResponse(content={
-    'results': results
-  })
+    # Read the audio file
+    audio_data = file.file.read()
+
+    # Perform audio transcription with Whisper
+    transcription_result = model.transcribe(audio_data)
+
+    return JSONResponse(content={
+        'transcription': transcription_result
+    })
+
+@app.post('/hifi')
+async def generate_audio(text: str):
+    if not text:
+        raise HTTPException(status_code=400, detail="No text was provided")
+
+    # Generate audio with HIFI GAN from the provided text
+    audio_data = hifi_gan_model.generate_audio(text)
+
+    # Create a temporary audio file to send as a response
+    with NamedTemporaryFile(delete=True, suffix=".wav") as temp:
+        temp.write(audio_data)
+
+        return FileResponse(temp.name)
 
 @app.get('/', response_class=RedirectResponse)
 async def redirect_docs():
   return '/docs'
-
-# app.mount('/static', StaticFiles(directory="static"), name="static")
-# templates = Jinja2Templates(directory="templates")
-
-# async def transribe(filename):
-#   model = await whisper.load_model('base')
-#   text = await model.transcribe('./assets/'+ filename)
-#   print(text)
-#   return text['text']
-
-# def get_files(path):
-#     for file in os.listdir(path):
-#         if os.path.isfile(os.path.join(path, file)):
-#             yield file
-
-# @app.get('/', response_class=HTMLResponse)
-# def index(requests: Request):
-#   return templates.TemplateResponse("index.html", context= {
-#     "request": requests
-# })
-
-# @app.get('/audio', response_class=HTMLResponse)
-# def audio(requests: Request):
-#   files = get_files('./assets')
-#   return templates.TemplateResponse("audio.html", context= {
-#     "request": requests,
-#     'filename': files
-# })
-
-# @app.post('/audio')
-# async def upload(request: Request, audio:str):
-#   text = await transribe(audio)
-
-#   return templates.TemplateResponse("index.html", context= {
-#     "request": requests,
-#     "transcribe": text
-# })
